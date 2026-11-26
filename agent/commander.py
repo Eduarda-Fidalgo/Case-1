@@ -27,6 +27,37 @@ def redact(v):
     return PII_RE.sub(lambda m: m.group(0).split("=")[0] + "=[REDACTED]", v) if isinstance(v, str) else v
 
 
+def hours_to_full(pts, cap=100.0):
+    """Quadratic least-squares fit (captures accelerating leaks); returns (hours_to_cap, slope_now)."""
+    n = len(pts)
+    xs = [(t - pts[-1][0]).total_seconds() / 3600 for t, _ in pts]
+    ys = [y for _, y in pts]
+    S = lambda k: sum(x ** k for x in xs)
+    T = lambda k: sum((x ** k) * y for x, y in zip(xs, ys))
+    A = [[n, S(1), S(2)], [S(1), S(2), S(3)], [S(2), S(3), S(4)]]
+    b = [T(0), T(1), T(2)]
+    det = lambda M: (M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) - M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) + M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]))
+    d = det(A)
+    if abs(d) < 1e-9:
+        return None, 0.0
+    coef = []
+    for i in range(3):
+        M = [row[:] for row in A]
+        for r in range(3):
+            M[r][i] = b[r]
+        coef.append(det(M) / d)
+    c0, c1, c2 = coef           # y = c0 + c1*x + c2*x^2, x=0 is now
+    if c1 <= 0:
+        return None, c1
+    # step forward until the fitted curve reaches the cap (max 72 h)
+    x = 0.0
+    while x < 72:
+        x += 0.05
+        if c0 + c1 * x + max(c2, 0) * x * x >= cap:
+            return x, c1
+    return None, c1
+
+
 def slope_per_hour(pts):
     n = len(pts)
     if n < 3:
@@ -52,7 +83,7 @@ class Commander:
         self.last_lab = None
         self.lab_disconnect = None
         self.pool = deque(maxlen=6)
-        self.heap = deque(maxlen=8)
+        self.heap = deque(maxlen=24)
         self.queue = deque(maxlen=13)
         self.deploys = {}
         self.err_sigs = defaultdict(set)
@@ -63,6 +94,9 @@ class Commander:
         self.pii_lines = 0
         self.last_metric = {}
         self.monitor_zero = 0
+        self.acks = {}            # alert_id -> {by, at, note}
+        self.auto_renotify = False
+        self.renotified = Counter()
 
     # ---------- incident lifecycle ----------
     def emit(self, key, status, level, service, hosts, title, why, action, line, extra=None):
@@ -89,6 +123,7 @@ class Commander:
         msg = {"alert_id": inc["id"], "emitted_at": self.clock.isoformat(), "status": status, "level": lv,
                "service": service, "hosts": inc["hosts"], "title": title, "explanation": why, "action": action,
                "notify": RESPONSE[lv]["who"], "channels": RESPONSE[lv]["how"], "sla": RESPONSE[lv]["sla"], "evidence_line": line}
+        msg["needs_ack"] = lv in ("P1", "P2") and status in ("open", "escalated")
         if lv in ("P1", "P2") or status != "open":
             self.alerts.append(msg)
         inc["updates"].append(msg)
@@ -206,17 +241,16 @@ class Commander:
         if m == "jvm heap usage":
             if s == "scheduling":
                 self.heap.append((t, r["heap_used_pct"]))
-                if len(self.heap) == 8:
-                    sl = slope_per_hour(list(self.heap))
+                if len(self.heap) >= 16:
+                    hrs, sl = hours_to_full(list(self.heap))
                     cur = self.heap[-1][1]
-                    if sl > 0.5:
-                        hrs = (100 - cur) / sl
+                    if hrs is not None and sl > 0.5:
                         eta = t + timedelta(hours=hrs)
                         if hrs < 12:
                             self.emit("heap", "open", "P2", s, [h], f"Memory leak - scheduling heap {cur}%, out-of-memory expected ~{eta:%d/%m %H:%M}",
-                                      f"Heap grows {sl:.1f} pts/h with no recovery after GC; projected exhaustion in {hrs:.1f} h. Other JVMs are stable at 41-49%.",
+                                      f"Heap grows {sl:.1f} pts/h and accelerating, never recovered by GC; projected exhaustion in {hrs:.1f} h. Other JVMs are stable at 41-49%.",
                                       "Heap dump + controlled restart in a low-traffic window before ETA; fix the leak.", n, {"eta": eta.isoformat()})
-                        if (cur >= 95 or hrs < 2):
+                        if cur >= 95 or hrs < 2:
                             self.emit("heap", "escalated", "P1", s, [h], f"Scheduling about to crash - heap {cur}%", "Exhaustion imminent.", "Restart now.", n)
                         if "heap" in self.incidents:
                             self.incidents["heap"]["eta"] = eta.isoformat()
@@ -261,8 +295,31 @@ class Commander:
         if s == "auth" and r.get("reason") == "BAD_CREDENTIALS": self.noise["individual bad passwords"] += 1
         if s == "reports" and m == "slow query": self.noise["slow report query q_monthly_occupancy"] += 1
 
+    def ack(self, alert_id, by, note=""):
+        if alert_id not in {a["alert_id"] for a in self.alerts}:
+            return False
+        self.acks[alert_id] = {"by": by or "unknown", "at": self.clock.isoformat() if self.clock else None, "note": note}
+        return True
+
     def tick(self, n):
         t = self.clock
+        # re-notify ("ring again") when a P1/P2 is not acknowledged within its SLA
+        if self.auto_renotify:
+            for inc in self.incidents.values():
+                if inc["status"] == "resolved" or inc["level"] not in ("P1", "P2") or inc["id"] in self.acks:
+                    continue
+                sla = timedelta(minutes=5 if inc["level"] == "P1" else 30)
+                k = self.renotified[inc["id"]]
+                last = inc["updates"][-1]["emitted_at"]
+                if k < 3 and t - datetime.fromisoformat(last) >= sla:
+                    self.renotified[inc["id"]] += 1
+                    nxt = ["Head of clinical service", "IT duty manager", "Hospital director on call"][k]
+                    msg = {"alert_id": inc["id"], "emitted_at": t.isoformat(), "status": "re-notify", "level": inc["level"],
+                           "service": inc["service"], "hosts": inc["hosts"], "title": f"NOT ACKNOWLEDGED - {inc['title']}",
+                           "explanation": f"No acknowledgment after {int(sla.seconds/60)} min. Ringing again and escalating to {nxt}.",
+                           "action": inc["action"], "notify": RESPONSE[inc['level']]["who"] + [nxt], "channels": ["PHONE", "SMS"],
+                           "sla": RESPONSE[inc['level']]["sla"], "evidence_line": n, "needs_ack": True}
+                    self.alerts.append(msg); inc["updates"].append(msg)
         # lab silence detector: runs on the clock, not on lab lines
         if self.last_lab and 7 <= t.hour <= 21 and t - self.last_lab > timedelta(minutes=15):
             dis = f" The HL7 connection to the analyser gateway was closed at {self.lab_disconnect[0]:%H:%M} (logged only as DEBUG)." if self.lab_disconnect else ""
@@ -319,11 +376,7 @@ def run(path, speed=None):
     return c, lines
 
 
-def write_outputs(c, lines, root):
-    os.makedirs(f"{root}/output", exist_ok=True)
-    with open(f"{root}/output/alerts.jsonl", "w") as f:
-        for a in c.alerts:
-            f.write(json.dumps(a, ensure_ascii=False) + "\n")
+def build_report(c):
     incs = sorted(c.incidents.values(), key=lambda i: (LEVEL_ORDER[i["level"]], i["opened"]))
     rep = ["# End-of-Day Incident Report - 2026-11-25", "",
            f"Lines analysed: {sum(c.stats.values())} | invalid: {len(c.invalid)} | alerts emitted: {len(c.alerts)} | incidents: {len(incs)}", "",
@@ -339,7 +392,19 @@ def write_outputs(c, lines, root):
     for i in incs:
         rep.append(f"| {i['id']} | {i['level']} | {i['opened'][11:16]} | {i['status']}{' '+i['resolved'][11:16] if i.get('resolved') else ''} | {i['service']} | {i['title']} | {i['why']} |")
     rep += ["", "## Suppressed noise (not alerted)", ""] + [f"- {k}: {v}" for k, v in c.noise.most_common()]
-    rep += ["", "## Affected patients (pseudonymised refs only)", "", "Prescriptions without dose check: " + ", ".join(c.bypass)]
+    rep += ["", "## Affected patients (pseudonymised refs only)", "", "Prescriptions without dose check: " + (", ".join(c.bypass) or "none")]
+    if c.acks:
+        rep += ["", "## Acknowledgments", ""] + [f"- {k}: {v['by']} at {str(v['at'])[11:16]} {v['note']}" for k, v in c.acks.items()]
+    return incs, "\n".join(rep)
+
+
+def write_outputs(c, lines, root):
+    os.makedirs(f"{root}/output", exist_ok=True)
+    with open(f"{root}/output/alerts.jsonl", "w") as f:
+        for a in c.alerts:
+            f.write(json.dumps(a, ensure_ascii=False) + "\n")
+    incs, rep = build_report(c)
+    rep = rep.split("\n")
     open(f"{root}/output/report.md", "w").write("\n".join(rep))
     # web data (redacted lines for the live replay)
     slim = []

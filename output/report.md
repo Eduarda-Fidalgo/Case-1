@@ -3,8 +3,8 @@
 Lines analysed: 6874 | invalid: 0 | alerts emitted: 14 | incidents: 12
 
 ## Action required before tomorrow morning
+- **[P2] Memory leak - scheduling heap 63.3%, out-of-memory expected ~26/11 01:54** - Heap dump + controlled restart in a low-traffic window before ETA; fix the leak.
 - **[P2] Admissions events backing up - queue at 46** - Scale consumers / investigate consumer throughput.
-- **[P2] Memory leak - scheduling heap 69.2%, out-of-memory expected ~26/11 03:59** - Heap dump + controlled restart in a low-traffic window before ETA; fix the leak.
 - **[P2] Release 2.14.0 broke /appointments/confirm** - Roll back to 2.13.4; inform patients/front desk.
 - **[P1 follow-up]** Pharmacy must review 38 prescriptions issued without dose check.
 - **[P1 follow-up]** DB connection leak root cause still unknown - pool was only reinitialised.
@@ -16,10 +16,10 @@ Lines analysed: 6874 | invalid: 0 | alerts emitted: 14 | incidents: 12
 | INC-03 | P1 | 07:58 | resolved 08:25 | auth | Staff cannot log in - identity provider idp-02:8443 unreachable | Repeated connection timeouts to the IdP and every login failing with UPSTREAM_TIMEOUT. Clinicians are locked out of all systems (shift change). |
 | INC-04 | P1 | 10:30 | resolved 15:21 | clinical-record-db | Database connection leak - pool at 75% and rising | Pool usage rises steadily (~1 pt / 10 min) during the day: a connection leak. At this pace the pool is exhausted in a few hours and the electronic health record stops. |
 | INC-05 | P1 | 11:02 | resolved 13:14 | lab-interface | No lab results for 15 min | Normal daytime rate is ~1 result/min. Results (troponin, INR, CBC) are not reaching clinicians. The HL7 connection to the analyser gateway was closed at 10:47 (logged only as DEBUG). Hourly stats still show 0 errors. |
-| INC-09 | P1 | 15:02 | resolved 16:35 | prescriptions | Prescriptions issued WITHOUT dose checking | dose_check='bypass' (never seen before today). Risk of medication error. Pharmacy stock sync is failing at the same time (1 partial syncs). |
+| INC-10 | P1 | 15:02 | resolved 16:35 | prescriptions | Prescriptions issued WITHOUT dose checking | dose_check='bypass' (never seen before today). Risk of medication error. Pharmacy stock sync is failing at the same time (1 partial syncs). |
 | INC-06 | P2 | 11:19 | resolved 11:53 | clinical-record | Patient personal data written to logs (GDPR) | Full name, civil ID and date of birth appear in log field 'ctx' after a config reload to verbose logging. Logs may already be replicated. |
-| INC-08 | P2 | 14:45 | active at end of day | admissions | Admissions events backing up - queue at 46 | Queue grew in 10/12 intervals over the last hour (produced > consumed). It will not drain on its own; admission/bed events are delayed. |
-| INC-10 | P2 | 16:15 | active at end of day | scheduling | Memory leak - scheduling heap 69.2%, out-of-memory expected ~26/11 03:59 | Heap grows 2.6 pts/h with no recovery after GC; projected exhaustion in 11.7 h. Other JVMs are stable at 41-49%. |
+| INC-08 | P2 | 14:00 | active at end of day | scheduling | Memory leak - scheduling heap 63.3%, out-of-memory expected ~26/11 01:54 | Heap grows 2.6 pts/h and accelerating, never recovered by GC; projected exhaustion in 11.9 h. Other JVMs are stable at 41-49%. |
+| INC-09 | P2 | 14:45 | active at end of day | admissions | Admissions events backing up - queue at 46 | Queue grew in 10/12 intervals over the last hour (produced > consumed). It will not drain on its own; admission/bed events are delayed. |
 | INC-11 | P2 | 17:30 | active at end of day | patient-portal | Release 2.14.0 broke /appointments/confirm | New error 'NullPointerException in SlotMapper' appeared only after deploy 2.13.4 -> 2.14.0 at 16:40 and keeps recurring. Load balancer health checks stay green. |
 | INC-01 | P3 | 06:00 | open | auth | Certificate 'saml-signing' expires 2026-12-15 (20 days) | If the SAML signing certificate expires, ALL SSO logins fail. |
 | INC-02 | P3 | 06:00 | open | system-monitor | Archive disk /var/lib/archive above 85% | Monitor projects full in 14 days (re-checked against real trend at end of day). Real trend: +2.05 pts/day from 88.0% => full in ~5.9 days (monitor said 14). |

@@ -33,4 +33,11 @@ python3 agent/commander.py                 # batch: writes output/alerts.jsonl, 
 python3 agent/commander.py --live 600      # real-time replay in the terminal (x600)
 ```
 Open `web/index.html` (live replay, incidents by urgency, messages, day/week history, log validation, end-of-day report).
-Pitch (2 min): `pitch/pitch.html`.
+
+### Live web app (real-time input, acknowledge, re-notify, play again, validation)
+```bash
+python3 agent/server.py --speed 600        # open http://localhost:8000 - replays the FULL hospital.log line by line
+python3 agent/server.py --follow /tmp/live.log & python3 agent/producer.py --to-file /tmp/live.log   # true tail of a growing file
+python3 agent/evaluate.py                  # validate emitted alerts vs ground truth (12/12 detected, 8/8 on time, 0 dup, 0 PII)
+```
+Pitch (2 min): `pitch/AI_Incident_Commander_pitch.pptx` (speaker notes with timings).
