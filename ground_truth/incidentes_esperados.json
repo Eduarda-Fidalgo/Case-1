@@ -1,0 +1,42 @@
+{
+  "_descricao": "Ground truth para avaliar o agente. detect_by = instante (UTC, 2026-11-25) até ao qual o alerta deveria ser emitido em modo tempo real; null = só relatório de fim de dia. Horas sem data referem-se a 2026-11-25.",
+  "incidentes": [
+    {"id": "INC-01", "nivel": "P1", "servico": "auth", "hosts": ["auth-01", "auth-02"], "inicio": "07:56:00", "fim": "08:25:30", "detect_by": "08:00:00", "tipo": "dependency_outage", "resumo": "IdP idp-02:8443 inacessível; 159 logins falhados, 0 sucessos", "linhas": [1219, 1602, 1609]},
+    {"id": "INC-02", "nivel": "P1", "servico": "lab-interface", "hosts": ["lab-01"], "inicio": "10:47:12", "fim": "13:12:40", "detect_by": "11:05:00", "tipo": "silent_feed", "resumo": "HL7 peer closed (DEBUG); 0 resultados 2h25; backlog 137", "linhas": [2963, 2964, 3800, 3801]},
+    {"id": "INC-03", "nivel": "P1", "nivel_inicial": "P2", "servico": "clinical-record-db", "hosts": ["db-01", "cr-01", "cr-02", "cr-03"], "inicio": "10:00:00", "fim": "15:21:00", "detect_by": "11:30:00", "escalate_to_p1_by": "13:40:00", "tipo": "resource_leak", "resumo": "Pool BD 71->96% linear; métricas em silêncio; 69 acquire timeouts; 113 HTTP 500; reinit manual", "linhas": [2565, 3919, 3963, 4233, 4810, 4826]},
+    {"id": "INC-04", "nivel": "P1", "servico": "prescriptions", "hosts": ["rx-01", "ph-01"], "inicio": "15:02:43", "fim": "16:27:30", "detect_by": "15:05:00", "tipo": "safety_control_bypassed", "resumo": "38 prescrições com dose_check=bypass; farmácia sync parcial 15:00-16:30", "linhas": [4657, 4688, 5338, 5350]},
+    {"id": "INC-05", "nivel": "P2", "servico": "patient-portal", "hosts": ["pp-01", "pp-02"], "inicio": "16:40:00", "fim": null, "detect_by": "17:35:00", "tipo": "deploy_regression", "resumo": "2.14.0: NPE SlotMapper em /appointments/confirm, 104 falhas (~86%)", "linhas": [5418, 5480, 6860]},
+    {"id": "INC-06", "nivel": "P2", "servico": "scheduling", "hosts": ["sch-01"], "inicio": "00:00:00", "fim": null, "detect_by": "16:00:00", "tipo": "memory_leak", "resumo": "Heap 38->91%, GC Old 25->1400 ms; OOM previsto ~02:00-03:00 26/11", "linhas": [6258, 6807, 6808]},
+    {"id": "INC-07", "nivel": "P2", "servico": "admissions", "hosts": ["adm-01"], "inicio": "14:00:00", "fim": null, "detect_by": "15:00:00", "tipo": "queue_backlog", "resumo": "admissions.events 10->480, produzido > consumido", "linhas": [4159, 5775, 6855]},
+    {"id": "INC-08", "nivel": "P2", "servico": "clinical-record", "hosts": ["cr-03"], "inicio": "11:19:05", "fim": "11:53:02", "detect_by": "11:20:00", "tipo": "pii_leak", "resumo": "log_ctx=verbose expôs nome/NIC/data nascimento de 12 doentes", "linhas": [3166, 3170, 3364, 3386]},
+    {"id": "INC-09", "nivel": "P3", "servico": "auth", "hosts": ["auth-01"], "inicio": "06:00:00", "fim": null, "detect_by": null, "tipo": "cert_expiry", "resumo": "saml-signing expira 2026-12-15 (20 dias)", "linhas": [639]},
+    {"id": "INC-10", "nivel": "P3", "servico": "system-monitor", "hosts": ["file-01"], "inicio": "06:00:03", "fim": null, "detect_by": null, "tipo": "capacity", "resumo": "/var/lib/archive 88%, +2.1pp/dia => cheio ~5.7 dias (monitor diz 14)", "linhas": [644, 6769]},
+    {"id": "INC-11", "nivel": "P3", "servico": "monitoring", "hosts": ["mon-01"], "inicio": "00:00:00", "fim": null, "detect_by": null, "tipo": "observability_gap", "resumo": "health sweep sempre 0 falhas; hourly stats 0 erros em outages; eventos críticos em DEBUG/INFO", "linhas": []},
+    {"id": "INC-12", "nivel": "P3", "servico": "auth", "hosts": ["auth-01"], "inicio": "13:40:02", "fim": "13:41:50", "detect_by": null, "tipo": "account_lockout", "resumo": "u0814 bloqueado após 8 BAD_CREDENTIALS em 82 s", "linhas": [3985, 4002]}
+  ],
+  "informativos_p4": [
+    {"servico": "integration-gateway", "resumo": "radiology-pacs usa /v1/patients deprecado (sunset 2027-01-31)", "ocorrencias": 48},
+    {"servico": "reports", "resumo": "q_monthly_occupancy lenta 4-6 s (limiar 2 s)", "ocorrencias": 22},
+    {"servico": "billing", "resumo": "4x HTTP 503 após deploy 3.8.0 (11:40-11:42), transitório", "ocorrencias": 4},
+    {"servico": "patient-portal", "resumo": "test.qa01 em produção: 6 unhandled exception 10:14-10:28", "ocorrencias": 6},
+    {"servico": "message-broker", "resumo": "consumidor notifications reconecta ~45 min, <1.8 s", "ocorrencias": 32},
+    {"servico": "clinical-record-db", "resumo": "pool a 86% durante backup 02:20-02:40, auto-recuperou", "ocorrencias": 3},
+    {"servico": "admissions", "resumo": "pico fila 125 às 09:20, recuperou 09:45", "ocorrencias": 1},
+    {"servico": "patient-portal", "resumo": "upstream timeout 12:14 resolvido por retry", "ocorrencias": 1}
+  ],
+  "ruido_nao_alertar": [
+    "backup: file vanished during backup (/tmp/.app.lock)",
+    "load-balancer: health check failed durante rolling deploy (rep-02, pp-02)",
+    "audit: DEBUG audit batch flushed com dump",
+    "cache: DEBUG cache miss / entry evicted",
+    "auth: BAD_CREDENTIALS isolados",
+    "integration-gateway: cada deprecated endpoint called individual",
+    "message-broker: cada reconexão individual"
+  ],
+  "regras_de_avaliacao": {
+    "max_alertas_por_incidente": 1,
+    "updates_permitidos": ["escalado", "resolvido"],
+    "pii_proibida_em_outputs": true,
+    "alertas_falsos_positivos_aceitaveis": 0
+  }
+}

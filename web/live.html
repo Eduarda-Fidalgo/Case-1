@@ -1,0 +1,66 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Incident Commander Live</title>
+<style>
+:root{--bg:#0f1220;--card:#181c2f;--tx:#e8eaf2;--mut:#8a90a8;--p1:#ff4d5e;--p2:#ffa62b;--p3:#4da3ff;--p4:#7a8199;--ok:#3ddc84}
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{padding:12px 16px;background:#13162a;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:5}
+h1{font-size:18px;margin:0}nav button{background:none;border:0;color:var(--mut);padding:8px 10px;cursor:pointer;font-size:14px}
+nav button.on{color:#fff;border-bottom:2px solid var(--p2)}main{padding:16px;max-width:1350px;margin:auto}
+.card{background:var(--card);border-radius:10px;padding:14px;margin-bottom:14px}.row{display:flex;gap:14px;flex-wrap:wrap}.row>*{flex:1;min-width:300px}
+.b{display:inline-block;padding:2px 8px;border-radius:6px;font-weight:700;font-size:12px;color:#000}.P1{background:var(--p1)}.P2{background:var(--p2)}.P3{background:var(--p3)}.P4{background:var(--p4)}
+.inc{border-left:4px solid;padding:10px 12px;margin:8px 0;background:#1e2340;border-radius:6px}.inc small,.mut{color:var(--mut)}
+.res{opacity:.55}#feed{height:420px;overflow:auto;font:12px ui-monospace,monospace;background:#0b0d18;padding:8px;border-radius:8px}
+.ERROR{color:#ff7a85}.WARN{color:#ffc46b}.DEBUG{color:#666}.INFO{color:#b8bdd0}.INVALID{color:#f0f}
+button.act{background:var(--p2);border:0;border-radius:6px;padding:7px 12px;font-weight:700;cursor:pointer;margin:2px}button.sec{background:#2a2f4a;color:#fff}
+button.ack{background:var(--ok)}input,select,textarea{background:#0b0d18;color:#fff;border:1px solid #2a2f4a;border-radius:6px;padding:6px}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #2a2f4a;text-align:left;vertical-align:top}
+.kpi{font-size:30px;font-weight:800}.bar{display:flex;align-items:flex-end;gap:3px;height:140px}.bar div{flex:1;display:flex;flex-direction:column-reverse}.bar span{display:block}
+.toast{position:fixed;right:16px;bottom:16px;max-width:400px;z-index:9}pre{white-space:pre-wrap}.pill{padding:2px 8px;border-radius:10px;background:#2a2f4a;font-size:12px}
+@keyframes ring{0%,100%{transform:none}25%{transform:rotate(-8deg)}75%{transform:rotate(8deg)}}.ring{display:inline-block;animation:ring .5s 3}
+</style></head><body>
+<header><h1>🏥 AI Incident Commander <span class="pill" id="st">connecting…</span> <span class="pill" id="clk"></span></h1><nav id="nav"></nav></header>
+<main id="app"></main><div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s),O={P1:1,P2:2,P3:3,P4:4};
+const RESP={P1:"Pager+SMS+phone · ack ≤5 min",P2:"Push+team channel · ack ≤30 min",P3:"Ticket · next business day",P4:"Report only"};
+let S={alerts:[],incidents:[],lines:[],noise:{},stats:{},hourly:{}},since=0,feed=[],seen=new Set(),tab="cmd",me=localStorage.getItem("me")||"";
+const tabs={cmd:"Command center",msg:"Messages & acknowledgments",val:"Validation",hist:"History (day / week)",rep:"End-of-day report"};
+const api=(p,b)=>fetch(p,b?{method:"POST",body:typeof b=="string"?b:JSON.stringify(b)}:{}).then(r=>r.json());
+function nav(){$("#nav").innerHTML=Object.entries(tabs).map(([k,v])=>`<button class="${k==tab?'on':''}" onclick="go('${k}')">${v}</button>`).join("")}
+function go(t){tab=t;nav();render(true)}
+async function poll(){try{const d=await api("/api/state?since="+since);since=d.next;feed.push(...d.lines);if(feed.length>1500)feed=feed.slice(-1500);
+ for(const a of d.alerts){const k=a.alert_id+a.status+a.emitted_at;if(!seen.has(k)){seen.add(k);if(S.clock)toast(a)}}
+ S=d;$("#st").textContent=d.error?d.error:d.done?"day complete":d.paused?"paused":`LIVE · ${d.mode} ×${d.speed}`;$("#clk").textContent=(d.clock||"").slice(0,19).replace("T"," ")+" UTC";render(false)}
+ catch(e){$("#st").textContent="server unreachable - retrying"}setTimeout(poll,700)}
+const ackBtn=id=>S.alerts.some(a=>a.alert_id==id&&a.ack)?`<span style="color:var(--ok)">✔ acknowledged by ${S.alerts.find(a=>a.alert_id==id).ack.by} at ${(S.alerts.find(a=>a.alert_id==id).ack.at||"").slice(11,16)}</span>`:`<button class="act ack" onclick="ack('${id}')">Acknowledge</button>`;
+async function ack(id){if(!me){me=prompt("Your name / role (e.g. Dr. Silva, on-call)")||"";localStorage.setItem("me",me)}if(!me)return;await api("/api/ack",{id,by:me});}
+const ctl=(action,extra={})=>api("/api/control",{action,...extra}).then(()=>{if(action=="restart"){since=0;feed=[];seen=new Set()}});
+function incCard(i){const live=i.status!="resolved"&&(i.level=="P1"||i.level=="P2");return `<div class="inc ${i.status=="resolved"?"res":""}" style="border-color:var(--${i.level.toLowerCase()})"><span class="b ${i.level}">${i.level}</span> <b>${i.id} · ${i.title}</b>
+<br><small>${i.service} @ ${i.hosts.join(", ")} · opened ${i.opened.slice(11,16)} · <b>${i.status}</b>${i.resolved?" at "+i.resolved.slice(11,16):""} · ${RESP[i.level]}</small><p>${i.why}</p><p><b>Action:</b> ${i.action}</p>${live?ackBtn(i.id):""}</div>`}
+function render(full){const a=$("#app");
+ if(tab=="cmd"){if(full||!$("#feed")){a.innerHTML=`<div class="card"><button class="act" onclick="ctl('restart',{speed:$('#sp').value})">⟲ Play again from 00:00</button><button class="act sec" onclick="ctl(S.paused?'resume':'pause')" id="pp">⏸ Pause</button>
+ speed <select id="sp" onchange="ctl('speed',{speed:this.value})"><option>60</option><option selected>600</option><option>1800</option><option>6000</option></select>
+ <span class="mut">Real-time input: replay, <code>--follow FILE</code>, or POST lines to <code>/api/ingest</code> (see Validation tab).</span></div>
+ <div class="row"><div class="card"><h3>Incoming log stream</h3><div id="feed"></div></div><div class="card"><h3>Incidents — most urgent first</h3><div id="kp" class="row"></div><div id="open"></div></div></div>`}
+ const f=$("#feed"),stick=f.scrollTop+f.clientHeight>=f.scrollHeight-30;f.innerHTML=feed.slice(-300).map(l=>`<div class="${l[2]}">${(l[1]||"").slice(11,19)} ${l[2].padEnd(5)} ${l[3]} ${l[5]} <span class="mut">${l[6]}</span>${l[7]!="replay"?" ⇐"+l[7]:""}</div>`).join("");if(stick)f.scrollTop=1e9;
+ $("#pp").textContent=S.paused?"▶ Resume":"⏸ Pause";
+ $("#kp").innerHTML=["P1","P2","P3"].map(l=>`<div><span class="b ${l}">${l}</span> <span class="kpi">${S.incidents.filter(i=>i.level==l&&i.status!="resolved").length}</span> <span class="mut">open</span></div>`).join("");
+ $("#open").innerHTML=S.incidents.map(incCard).join("")||"<p class='mut'>No incidents yet — the agent is watching.</p>";return}
+ if(tab=="msg"){a.innerHTML=`<div class="card"><h3>Every message the agent sent (${S.alerts.length}) — one per problem + escalation / re-notify / resolution</h3><p class="mut">Unacknowledged P1 alerts ring again every 5 min (P2: 30 min), escalating up the chain, until someone acknowledges.</p>
+ <table><tr><th>Sim time</th><th>Level / type</th><th>Sent to</th><th>Message</th><th>Acknowledged?</th></tr>${[...S.alerts].reverse().map(m=>`<tr><td>${m.emitted_at.slice(11,19)}</td><td><span class="b ${m.level}">${m.level}</span> ${m.status=="re-notify"?'<span class="ring">🔔</span>':""}${m.status}</td><td>${m.notify.join(", ")}<br><small class="mut">${m.channels.join(" · ")}</small></td><td><b>${m.title}</b><br>${m.explanation}<br><i>Action: ${m.action}</i><br><small class="mut">log line ${m.evidence_line}</small></td><td>${m.needs_ack?ackBtn(m.alert_id):"—"}</td></tr>`).join("")}</table></div>`;return}
+ if(tab=="val"){if(!full)return;a.innerHTML=`<div class="card"><h3>Validate what was already sent</h3><p class="mut">Compares the alerts emitted so far with the expected incidents (ground truth): detected, level, on time, duplicates, PII leaks.</p><button class="act" onclick="evalNow()">Run validation now</button><div id="ev"></div></div>
+ <div class="row"><div class="card"><h3>Validate a log file</h3><input type="file" id="fi"><div id="vr"></div></div>
+ <div class="card"><h3>Real-time input — send log lines now</h3><textarea id="ing" rows="5" style="width:100%" placeholder='{"timestamp":"2026-11-25T12:00:00Z","level":"INFO","service":"prescriptions","host":"rx-01","trace_id":"x","message":"prescription issued","patient_ref":"PR-1","prescriber":"u1","dose_check":"bypass"}'></textarea><button class="act" onclick="ingest()">Send to agent</button> <span id="ir" class="mut"></span></div></div>`;
+ $("#fi").onchange=e=>{const f=e.target.files[0];if(!f)return;if(f.size>50e6){$("#vr").innerHTML="<p>File larger than 50 MB — use the CLI agent (streams line by line).</p>";return}f.text().then(t=>api("/api/validate",t)).then(r=>$("#vr").innerHTML=`<p><b style="color:${r.ok?'var(--ok)':'var(--p1)'}">${r.message}</b></p><p>${r.lines||0} lines · ${r.invalid_json||0} invalid JSON ${r.invalid_lines&&r.invalid_lines.length?"(lines "+r.invalid_lines.join(", ")+")":""} · ${r.missing_fields||0} missing fields · ${r.out_of_order||0} out of order</p>`)};evalNow();return}
+ if(tab=="hist"){if(!full)return;const H=S.hourly,mx=Math.max(1,...Object.values(H).map(v=>Object.values(v).reduce((x,y)=>x+y,0)));const day=(S.clock||"2026-11-25").slice(0,10);
+ const days=[...Array(7)].map((_,k)=>{const d=new Date("2026-11-25");d.setDate(d.getDate()-6+k);return d.toISOString().slice(0,10)});
+ a.innerHTML=`<div class="card"><h3>Day view · ${day} · log volume per hour (red = errors, orange = warnings)</h3><div class="bar">${[...Array(24)].map((_,h)=>{const v=H[h]||{};return `<div title="${h}h">${["INFO","DEBUG","WARN","ERROR"].map(k=>`<span style="height:${(v[k]||0)/mx*130}px;background:${{INFO:'#3b4266',DEBUG:'#2a2f4a',WARN:'var(--p2)',ERROR:'var(--p1)'}[k]}"></span>`).join("")}</div>`}).join("")}</div><div class="mut" style="display:flex;justify-content:space-between"><span>00h</span><span>12h</span><span>23h</span></div>
+ <table>${[...S.incidents].sort((x,y)=>x.opened.localeCompare(y.opened)).map(i=>`<tr><td>${i.opened.slice(11,16)}</td><td><span class="b ${i.level}">${i.level}</span></td><td>${i.title}</td><td>${i.status}</td></tr>`).join("")}</table></div>
+ <div class="card"><h3>Week view</h3><table><tr><th>Day</th><th>P1</th><th>P2</th><th>P3</th><th>Log lines</th></tr>${days.map(d=>d=="2026-11-25"?`<tr><td>${d}</td>${["P1","P2","P3"].map(l=>`<td>${S.incidents.filter(i=>i.level==l).length}</td>`).join("")}<td>${S.n}</td></tr>`:`<tr class="mut"><td>${d}</td><td colspan=4>Not found — no log provided for this day (nothing invented).</td></tr>`).join("")}</table></div>`;return}
+ if(tab=="rep"){if(!full)return;api("/api/report").then(r=>a.innerHTML=`<div class="card"><button class="act" onclick="go('rep')">Refresh</button><pre>${r.report.replace(/</g,"&lt;")}</pre></div>`)}}
+async function evalNow(){const r=await api("/api/evaluate");$("#ev").innerHTML=`<p><b>${r.detected}/${r.expected}</b> expected incidents detected so far · <b>${r.on_time}/${r.with_target}</b> on time · duplicates: <b>${r.duplicates}</b> · PII in outputs: <b>${r.pii_in_outputs}</b>${r.unexpected_incidents.length?" · unexpected: "+r.unexpected_incidents.join("; "):""}</p>
+ <table><tr><th>Expected</th><th>Level</th><th>Detected</th><th>Agent alert</th><th>Opened</th><th>Target</th><th>On time</th></tr>${r.rows.map(x=>`<tr><td>${x.expected} ${x.summary}</td><td>${x.level_expected}</td><td>${x.detected?"✅":"⏳ not yet"}</td><td>${x.agent_id||""} ${x.level_agent||""}</td><td>${x.opened||""}</td><td>${x.target||"report only"}</td><td>${x.on_time===undefined?"—":x.on_time?"✅":"❌"}</td></tr>`).join("")}</table>`}
+async function ingest(){const r=await api("/api/ingest",$("#ing").value);$("#ir").textContent=r.ok?`${r.lines} line(s) ingested — check Command center`:"failed"}
+function toast(a){if(O[a.level]>2&&a.status=="open")return;const t=$("#toast");t.innerHTML=`<div class="inc" style="border-color:var(--${a.level.toLowerCase()});box-shadow:0 4px 20px #000"><span class="b ${a.level}">${a.level}</span> <b>${a.status.toUpperCase()}</b> ${a.title}<br><small>${a.notify.join(", ")}</small></div>`;clearTimeout(t._t);t._t=setTimeout(()=>t.innerHTML="",4000)}
+nav();render(true);poll();
+</script></body></html>
