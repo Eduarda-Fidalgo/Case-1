@@ -26,3 +26,11 @@ dá o alarme quando necessário e comunica o resto num relatório de fim de dia.
 | 🔵 P4 | 8 | Endpoint deprecado, query lenta, transitórios de deploy, QA em produção, … |
 
 Detalhe e evidências: [`docs/04-incidentes.md`](docs/04-incidentes.md).
+
+## MVP — run it
+```bash
+python3 agent/commander.py                 # batch: writes output/alerts.jsonl, output/report.md, web/data.js
+python3 agent/commander.py --live 600      # real-time replay in the terminal (x600)
+```
+Open `web/index.html` (live replay, incidents by urgency, messages, day/week history, log validation, end-of-day report).
+Pitch (2 min): `pitch/pitch.html`.
